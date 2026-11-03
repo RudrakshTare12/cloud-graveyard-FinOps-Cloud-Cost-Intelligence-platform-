@@ -1,36 +1,37 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+<div align="center">
 
-## Getting Started
+# 🎃 CloudGraveyard - Enterprise FinOps & Zombie Resource Purger
 
-First, run the development server:
+**An enterprise-grade Cloud Cost Intelligence & FinOps SaaS platform designed to detect, analyze, and purge unutilized cloud infrastructure.**
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+[Live Demo](#) · [Report Bug](https://github.com/RudrakshTare12/cloud-graveyard/issues) · [Request Feature](https://github.com/RudrakshTare12/cloud-graveyard/issues)
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+</div>
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 🚀 Overview
 
-## Learn More
+**CloudGraveyard** is a cutting-edge FinOps tool built to tackle cloud financial waste. It automatically identifies and eliminates idle or abandoned "zombie" resources (such as idle EC2 instances, unattached EBS volumes, and abandoned RDS databases) while maintaining strict enterprise compliance via automated AWS S3 audit logging.
 
-To learn more about Next.js, take a look at the following resources:
+## ✨ Key Features
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- **🤖 Autonomous Zombie Detection:** Intelligently scans and flags idle, unutilized multi-cloud infrastructure draining monthly budgets.
+- **📊 Cost Anomaly Intelligence:** Real-time financial waste tracking with projected annual exposure alerts.
+- **🔒 Immutable AWS S3 Audit Vault:** Generates secure compliance log receipts and audit trails for every purged resource.
+- **🎨 Immersive Cyberpunk UI:** Dark-mode interface styled with a unique Halloween theme, complete with Web Audio API sound effects.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 🛠️ Tech Stack
 
-## Deploy on Vercel
+- **Frontend & UI:** Next.js 14, React, Tailwind CSS, Lucide Icons, Web Audio API
+- **Backend & Database:** Node.js, MySQL (Structured asset pooling)
+- **Cloud Integration:** AWS SDK for JavaScript v3 (S3 Audit Log Persistence)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 📦 Getting Started & Local Setup
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Follow these steps to set up the project locally on your machine:
+
+1. **Clone the repository:**
+   ```bash
+   git clone [https://github.com/RudrakshTare12/cloud-graveyard.git](https://github.com/RudrakshTare12/cloud-graveyard.git)
+   cd cloud-graveyard
