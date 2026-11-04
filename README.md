@@ -93,3 +93,31 @@ The interface leans into a Halloween theme (dark cyberpunk graveyard, glowing fo
    ```
 
 ## 🗂️ Project Structure
+
+## 🎯 How It Maps to the Hackathon Rubric
+
+| Criterion | What this build covers |
+|---|---|
+| **Event Theme** | Halloween-styled graveyard UI, tombstone resource cards, themed sound design |
+| **AWS Implementation / Deployment** | `/api/purge` contract designed for S3-backed audit logging via AWS SDK v3 |
+| **Idea & Problem Statement** | Directly addresses idle cloud spend — a real, common FinOps problem |
+| **UI / UX** | Click-through detail drawer, clear plain-language labels, responsive table/card views, accessible modals |
+| **Business Model / Scale** | Cost anomaly tracking, waste breakdown by region/service, projected annual savings |
+| **Codebase & README** | Fully typed TypeScript, no unused dependencies, documented setup and API contract |
+
+## 🧭 Roadmap
+
+- [ ] Wire up `/api/purge` to real AWS SDK calls with S3 Object Lock for tamper-evident storage
+- [ ] Add authentication and per-team resource ownership
+- [ ] Replace the in-memory seed data with a live multi-cloud resource scanner
+- [ ] Add scheduled scans + email/Slack alerts for newly flagged resources
+
+## 📄 License
+
+MIT — see [LICENSE](LICENSE) for details.
+
+---
+
+<div align="center">
+Built with 🎃 for Hack-to-ween 2026 · IIT Jodhpur
+</div>
