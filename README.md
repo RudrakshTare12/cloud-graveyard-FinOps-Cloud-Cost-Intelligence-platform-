@@ -1,8 +1,10 @@
 <div align="center">
 
-# 🎃 CloudGraveyard - Enterprise FinOps & Zombie Resource Purger
+# 🎃 CloudGraveyard — Find and Delete Wasted Cloud Resources
 
-**An enterprise-grade Cloud Cost Intelligence & FinOps SaaS platform designed to detect, analyze, and purge unutilized cloud infrastructure.**
+**A FinOps tool that scans your cloud inventory, flags unused resources, shows what they're costing you, and deletes them with an auditable trail — wrapped in a Halloween-themed interface.**
+
+Built for **Hack-to-ween 2026** · IIT Jodhpur
 
 [Live Demo](#) · [Report Bug](https://github.com/RudrakshTare12/cloud-graveyard/issues) · [Request Feature](https://github.com/RudrakshTare12/cloud-graveyard/issues)
 
@@ -12,26 +14,82 @@
 
 ## 🚀 Overview
 
-**CloudGraveyard** is a cutting-edge FinOps tool built to tackle cloud financial waste. It automatically identifies and eliminates idle or abandoned "zombie" resources (such as idle EC2 instances, unattached EBS volumes, and abandoned RDS databases) while maintaining strict enterprise compliance via automated AWS S3 audit logging.
+Cloud bills quietly grow because nobody remembers to turn things off: a dev EC2 instance nobody uses, an EBS volume with nothing attached, a test database from last quarter. **CloudGraveyard** finds those resources, tells you exactly what they cost per month and per year, and lets you delete them safely — with every deletion written to an audit log so you have a record of what was removed and when.
+
+The interface leans into a Halloween theme (dark cyberpunk graveyard, glowing fog, tombstone-style resource cards, Web Audio sound effects) without hiding the actual product behind costume jargon — every button does what it says.
 
 ## ✨ Key Features
 
-- **🤖 Autonomous Zombie Detection:** Intelligently scans and flags idle, unutilized multi-cloud infrastructure draining monthly budgets.
-- **📊 Cost Anomaly Intelligence:** Real-time financial waste tracking with projected annual exposure alerts.
-- **🔒 Immutable AWS S3 Audit Vault:** Generates secure compliance log receipts and audit trails for every purged resource.
-- **🎨 Immersive Cyberpunk UI:** Dark-mode interface styled with a unique Halloween theme, complete with Web Audio API sound effects.
+- **🔍 One-click resource scan** — simulates a re-check of your inventory with a loading state and timestamp of the last scan.
+- **🪦 Click-through detail drawer** — click any resource to open a side panel with full details (type, region, owner, last activity, risk score, monthly cost) before deciding to delete it.
+- **💀 Safe two-step deletion** — delete requires an explicit confirmation step inside the detail drawer, and writes a permanent audit record.
+- **📊 Cost Anomaly banner** — live monthly and projected annual waste, updated as resources are added or removed.
+- **📈 Waste breakdown** — toggle between "by region" and "by service type" to see where the cost is concentrated.
+- **📜 Audit log** — every deletion is logged with a timestamp, reclaimed cost, object key, and an integrity checksum; exportable as JSON.
+- **🔌 Live/Simulated mode** — attempts a real `POST /api/purge` call; if the backend isn't connected, it falls back to simulated mode automatically and tells you so (never silently fakes a live result).
+- **🔊 Sound design** — short Web Audio cues for scanning, deleting, and confirmations, with a one-click mute toggle that persists across visits.
+- **🎨 Immersive dark UI** — glassmorphism cards, ambient fog and moonlight, tombstone-shaped icons, skeleton loaders during scans, and full keyboard/accessibility support (focus traps, `Escape` to close, ARIA roles, `/` to focus search).
+- **📱 Fully responsive** — table view on desktop, card view on mobile.
 
 ## 🛠️ Tech Stack
 
-- **Frontend & UI:** Next.js 14, React, Tailwind CSS, Lucide Icons, Web Audio API
-- **Backend & Database:** Node.js, MySQL (Structured asset pooling)
-- **Cloud Integration:** AWS SDK for JavaScript v3 (S3 Audit Log Persistence)
+- **Frontend:** Next.js 14 (App Router), React, TypeScript
+- **Styling:** Tailwind CSS, custom CSS animations
+- **Icons:** Lucide React
+- **Audio:** Web Audio API (no external audio files)
+- **Backend (expected):** Node.js API route at `/api/purge`
+- **Cloud Integration:** AWS SDK for JavaScript v3 (S3 for audit log persistence)
 
-## 📦 Getting Started & Local Setup
+## 📦 Getting Started
 
-Follow these steps to set up the project locally on your machine:
+### Prerequisites
+- Node.js 18+
+- npm or pnpm
 
-1. **Clone the repository:**
+### Local Setup
+
+1. **Clone the repository**
    ```bash
-   git clone [https://github.com/RudrakshTare12/cloud-graveyard.git](https://github.com/RudrakshTare12/cloud-graveyard.git)
+   git clone https://github.com/RudrakshTare12/cloud-graveyard.git
    cd cloud-graveyard
+   ```
+
+2. **Install dependencies**
+   ```bash
+   npm install
+   ```
+
+3. **Run the development server**
+   ```bash
+   npm run dev
+   ```
+   Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+4. **(Optional) Connect a real delete API**
+   The app calls `POST /api/purge` with `{ resourceId, resourceName, kind, region, monthlyCost }` and expects `{ auditId, s3Key }` back. Without this route, every deletion is automatically logged in **Simulated** mode instead — the app still works end-to-end for demo purposes.
+
+   Example route using AWS SDK v3:
+   ```ts
+   // app/api/purge/route.ts
+   import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+   import { randomUUID } from 'crypto';
+
+   const s3 = new S3Client({ region: process.env.AWS_REGION });
+
+   export async function POST(req: Request) {
+     const body = await req.json();
+     const auditId = randomUUID();
+     const s3Key = `audit/deletions/${Date.now()}-${body.resourceId}.json`;
+
+     await s3.send(new PutObjectCommand({
+       Bucket: process.env.AUDIT_BUCKET,
+       Key: s3Key,
+       Body: JSON.stringify({ ...body, auditId, timestamp: new Date().toISOString() }),
+       ContentType: 'application/json',
+     }));
+
+     return Response.json({ auditId, s3Key });
+   }
+   ```
+
+## 🗂️ Project Structure
