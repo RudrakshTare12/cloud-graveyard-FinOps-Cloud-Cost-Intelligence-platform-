@@ -10,6 +10,7 @@ import React, {
 } from 'react';
 import {
     Activity,
+    AlertCircle,
     AlertTriangle,
     CheckCircle2,
     Clock,
@@ -22,24 +23,23 @@ import {
     FileText,
     Ghost,
     HardDrive,
+    Info,
     Layers,
     Loader2,
+    MapPin,
     Plus,
     RefreshCw,
     Search,
     ShieldAlert,
     ShieldCheck,
     Skull,
+    Tag,
     Trash2,
+    User,
     Volume2,
     VolumeX,
     X,
-    Info,
-    AlertCircle,
     ChevronRight,
-    MapPin,
-    Tag,
-    User,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -54,6 +54,8 @@ type RegionFilter = Region | 'All';
 type ToastTone = 'success' | 'warning' | 'info';
 type Connection = 'standby' | 'live' | 'simulated';
 type Dimension = 'region' | 'kind';
+type ReactionKind = 'add' | 'delete' | 'export' | 'scan';
+type ReactionFace = 'smile' | 'neutral';
 
 interface Asset {
     id: string;
@@ -85,6 +87,14 @@ interface Toast {
     message: string;
 }
 
+interface Reaction {
+    id: number;
+    kind: ReactionKind;
+    face: ReactionFace;
+    title: string;
+    detail: string;
+}
+
 interface PurgeResponse {
     auditId: string;
     s3Key: string;
@@ -106,6 +116,18 @@ interface BreakdownRow {
     share: number;
 }
 
+interface Tone {
+    type: OscillatorType;
+    from: number;
+    to: number;
+    duration: number;
+    peak: number;
+    delay?: number;
+}
+
+type Cue = 'click' | 'scan' | 'delete' | 'success' | 'warning' | 'neutral';
+type WindowWithWebkit = Window & { webkitAudioContext?: typeof AudioContext };
+
 /* -------------------------------------------------------------------------- */
 /*                                  Constants                                 */
 /* -------------------------------------------------------------------------- */
@@ -113,10 +135,13 @@ interface BreakdownRow {
 const LOG_BUCKET = 'cloud-graveyard-logs';
 const LOG_PREFIX = 'audit/deletions';
 const SOUND_KEY = 'cg-sound-preference';
+const INTRO_KEY = 'cg-intro-seen';
 
+const INTRO_MS = 3200;
 const SCAN_MS = 1500;
 const EXIT_MS = 500;
 const TOAST_TTL_MS = 4000;
+const REACTION_TTL_MS = 2200;
 const PURGE_TIMEOUT_MS = 4000;
 const MAX_NAME_LENGTH = 64;
 const MAX_COST = 100_000;
@@ -145,66 +170,39 @@ const STATUS_STYLE: Record<Status, string> = {
     Orphaned: 'text-violet-300 bg-violet-500/10 border-violet-400/30',
     Healthy: 'text-emerald-300 bg-emerald-400/10 border-emerald-400/30',
 };
-
 const STATUS_DOT: Record<Status, string> = {
     Zombie: 'bg-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.9)]',
     Idle: 'bg-amber-300 shadow-[0_0_8px_rgba(252,211,77,0.8)]',
     Orphaned: 'bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.9)]',
     Healthy: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]',
 };
-
 const STATUS_HELP: Record<Status, string> = {
     Zombie: 'Running, but unused for a long time. Safe to delete in most cases.',
     Idle: 'Low activity. Review before deleting.',
     Orphaned: 'Not attached to anything. Usually safe to delete.',
     Healthy: 'In active use. Keep this.',
 };
-
 const KIND_ICON: Record<Kind, LucideIcon> = {
     'EC2 Instance': Cpu,
     'RDS Database': Database,
     'EBS Volume': HardDrive,
     'S3 Bucket': Cloud,
 };
-
-const CONNECTION_LABEL: Record<Connection, string> = {
-    standby: 'Not connected',
-    live: 'Live',
-    simulated: 'Simulated',
-};
-
-const CONNECTION_STYLE: Record<Connection, string> = {
-    standby: 'text-slate-300',
-    live: 'text-emerald-300',
-    simulated: 'text-amber-300',
-};
-
-const TOAST_ICON: Record<ToastTone, LucideIcon> = {
-    success: CheckCircle2,
-    warning: AlertCircle,
-    info: Info,
-};
-
+const CONNECTION_LABEL: Record<Connection, string> = { standby: 'Not connected', live: 'Live', simulated: 'Simulated' };
+const CONNECTION_STYLE: Record<Connection, string> = { standby: 'text-slate-300', live: 'text-emerald-300', simulated: 'text-amber-300' };
+const TOAST_ICON: Record<ToastTone, LucideIcon> = { success: CheckCircle2, warning: AlertCircle, info: Info };
 const TOAST_STYLE: Record<ToastTone, string> = {
     success: 'border-emerald-500/50 text-emerald-200',
     warning: 'border-rose-500/50 text-rose-200',
     info: 'border-cyan-400/50 text-cyan-200',
 };
 
-/* -------------------------------------------------------------------------- */
-/*                              Sound definitions                             */
-/* -------------------------------------------------------------------------- */
-
-type Cue = 'click' | 'scan' | 'delete' | 'success' | 'warning';
-
-interface Tone {
-    type: OscillatorType;
-    from: number;
-    to: number;
-    duration: number;
-    peak: number;
-    delay?: number;
-}
+const REACTION_COPY: Record<ReactionKind, { title: (name: string) => string; detail: (money: string) => string }> = {
+    add: { title: (n) => `${n} added`, detail: () => 'Now being watched for cost and activity.' },
+    delete: { title: (n) => `${n} deleted`, detail: (m) => `${m}/mo reclaimed and logged.` },
+    export: { title: () => 'Audit log exported', detail: () => 'Saved as a JSON file on your device.' },
+    scan: { title: () => 'Scan complete', detail: () => 'Inventory re-checked.' },
+};
 
 const CUES: Record<Cue, Tone[]> = {
     click: [{ type: 'sine', from: 760, to: 560, duration: 0.08, peak: 0.06 }],
@@ -216,60 +214,11 @@ const CUES: Record<Cue, Tone[]> = {
     success: [
         { type: 'sine', from: 523, to: 523, duration: 0.16, peak: 0.08 },
         { type: 'sine', from: 659, to: 659, duration: 0.24, peak: 0.07, delay: 0.14 },
+        { type: 'sine', from: 784, to: 784, duration: 0.3, peak: 0.06, delay: 0.3 },
     ],
     warning: [{ type: 'sine', from: 180, to: 130, duration: 0.3, peak: 0.1 }],
+    neutral: [{ type: 'triangle', from: 340, to: 240, duration: 0.3, peak: 0.07 }],
 };
-
-type WindowWithWebkit = Window & { webkitAudioContext?: typeof AudioContext };
-
-function scheduleTone(ctx: AudioContext, tone: Tone, base: number): void {
-    const start = base + (tone.delay ?? 0);
-    const end = start + tone.duration;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = tone.type;
-    osc.frequency.setValueAtTime(tone.from, start);
-    osc.frequency.exponentialRampToValueAtTime(tone.to, end);
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(tone.peak, start + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.0001, end);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
-    osc.start(start);
-    osc.stop(end + 0.02);
-}
-
-function useSoundEngine(enabled: boolean): (cue: Cue) => void {
-    const ctxRef = useRef<AudioContext | null>(null);
-    const enabledRef = useRef(enabled);
-
-    useEffect(() => { enabledRef.current = enabled; }, [enabled]);
-    useEffect(() => {
-        return () => {
-            const ctx = ctxRef.current;
-            ctxRef.current = null;
-            if (ctx && ctx.state !== 'closed') void ctx.close().catch(() => undefined);
-        };
-    }, []);
-
-    return useCallback((cue: Cue) => {
-        if (!enabledRef.current || typeof window === 'undefined') return;
-        try {
-            if (!ctxRef.current) {
-                const Ctor = window.AudioContext ?? (window as WindowWithWebkit).webkitAudioContext;
-                if (!Ctor) return;
-                ctxRef.current = new Ctor();
-            }
-            const ctx = ctxRef.current;
-            if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined);
-            const now = ctx.currentTime;
-            CUES[cue].forEach((tone) => scheduleTone(ctx, tone, now));
-        } catch {
-            // Sound is decorative; never let it break the app.
-        }
-    }, []);
-}
 
 /* -------------------------------------------------------------------------- */
 /*                               Global styles                                */
@@ -292,45 +241,72 @@ const GLOBAL_CSS = `
 .cg-card:hover { transform: translateY(-2px); border-color: rgba(16,185,129,0.35); box-shadow: 0 16px 40px -22px rgba(16,185,129,0.4); }
 .cg-tombstone { border-radius: 50% 50% 6px 6px / 24% 24% 6px 6px; }
 
+/* ---------- Ambient animated background (always on) ---------- */
 .cg-fog {
-  position: fixed; inset: -20%; pointer-events: none;
+  position: fixed; inset: -20%; pointer-events: none; z-index: 0;
   background:
     radial-gradient(ellipse 60% 35% at 30% 92%, rgba(16,185,129,0.12), transparent 70%),
     radial-gradient(ellipse 50% 30% at 78% 88%, rgba(244,63,94,0.1), transparent 70%);
   animation: cg-fog 24s ease-in-out infinite alternate;
 }
 .cg-moon {
-  position: fixed; top: 6vh; right: 8vw; width: 130px; height: 130px; border-radius: 9999px;
+  position: fixed; top: 6vh; right: 8vw; width: 130px; height: 130px; border-radius: 9999px; z-index: 0;
   background: radial-gradient(circle at 30% 30%, rgba(241,245,249,0.85) 0%, rgba(203,213,225,0.5) 30%, rgba(100,116,139,0.2) 60%, transparent 72%);
   box-shadow: 0 0 80px 18px rgba(226,232,240,0.08), 0 0 160px 60px rgba(16,185,129,0.06);
   pointer-events: none; animation: cg-breathe 9s ease-in-out infinite;
 }
-.cg-vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.75) 100%); }
+.cg-vignette { position: fixed; inset: 0; pointer-events: none; z-index: 0; background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.75) 100%); }
+
+.cg-bat { position: fixed; top: var(--y); left: -60px; width: var(--s); height: var(--s); color: rgba(226,232,240,0.3); pointer-events: none; z-index: 1; animation: cg-bat-fly var(--d) linear infinite; animation-delay: var(--delay); }
+.cg-bat svg { animation: cg-bob 0.45s ease-in-out infinite alternate; }
+
+.cg-pumpkin-drift { position: fixed; bottom: -40px; width: var(--s); height: var(--s); opacity: 0.16; pointer-events: none; z-index: 0; animation: cg-pumpkin-rise var(--d) linear infinite; animation-delay: var(--delay); left: var(--x); }
 
 .cg-float { animation: cg-float 7s ease-in-out infinite; }
 .cg-exit { animation: cg-exit 0.5s ease-in forwards; pointer-events: none; }
-.cg-shimmer {
-  background-color: rgba(30,41,59,0.5);
-  background-image: linear-gradient(100deg, transparent 20%, rgba(16,185,129,0.14) 50%, transparent 80%);
-  background-size: 200% 100%;
-  animation: cg-shimmer 1.6s linear infinite;
-}
+.cg-shimmer { background-color: rgba(30,41,59,0.5); background-image: linear-gradient(100deg, transparent 20%, rgba(16,185,129,0.14) 50%, transparent 80%); background-size: 200% 100%; animation: cg-shimmer 1.6s linear infinite; }
 .cg-scanline { background: linear-gradient(180deg, transparent, rgba(16,185,129,0.16), transparent); animation: cg-scan 1.5s ease-in-out infinite; }
 .cg-fade-in { animation: cg-fade-in 0.2s ease-out both; }
 .cg-fade-up { animation: cg-fade-up 0.28s cubic-bezier(0.22,1,0.36,1) both; }
 .cg-slide-in { animation: cg-slide-in 0.28s cubic-bezier(0.22,1,0.36,1) both; }
 .cg-drawer-in { animation: cg-drawer-in 0.3s cubic-bezier(0.22,1,0.36,1) both; }
+.cg-pop-in { animation: cg-pop-in 0.35s cubic-bezier(0.34,1.56,0.64,1) both; }
+.cg-pop-out { animation: cg-pop-out 0.25s ease-in forwards; }
+
+/* ---------- Intro sequence ---------- */
+.cg-intro-bat { position: absolute; top: 18%; left: -10%; width: 64px; height: 64px; color: #a7f3d0; animation: cg-intro-bat-fly 2.6s cubic-bezier(0.45,0.05,0.55,0.95) forwards; }
+.cg-intro-bat svg { animation: cg-bob 0.3s ease-in-out infinite alternate; }
+.cg-intro-skel { position: absolute; bottom: 16%; left: -8%; width: 72px; animation: cg-intro-walk 2.8s ease-in-out 0.3s forwards; }
+.cg-intro-skel .cg-leg-l { transform-origin: 50% 0%; animation: cg-leg-swing 0.42s ease-in-out infinite alternate; }
+.cg-intro-skel .cg-leg-r { transform-origin: 50% 0%; animation: cg-leg-swing 0.42s ease-in-out infinite alternate-reverse; }
+.cg-intro-skel .cg-arm-l { transform-origin: 50% 0%; animation: cg-arm-swing 0.42s ease-in-out infinite alternate-reverse; }
+.cg-intro-skel .cg-arm-r { transform-origin: 50% 0%; animation: cg-arm-swing 0.42s ease-in-out infinite alternate; }
+.cg-intro-fade { animation: cg-fade-out 0.5s ease-in forwards; }
 
 @keyframes cg-fog { from { transform: translate3d(-3%,0,0); } to { transform: translate3d(3%,-2%,0); } }
 @keyframes cg-breathe { 0%,100% { opacity: 0.45; } 50% { opacity: 0.7; } }
+@keyframes cg-bat-fly { from { transform: translateX(0); } to { transform: translateX(calc(100vw + 120px)); } }
+@keyframes cg-bob { from { transform: translateY(0) scaleY(1); } to { transform: translateY(-4px) scaleY(0.82); } }
+@keyframes cg-pumpkin-rise { from { transform: translateY(0) rotate(0deg); } to { transform: translateY(-110vh) rotate(25deg); } }
 @keyframes cg-float { 0%,100% { transform: translate3d(0,0,0); } 50% { transform: translate3d(0,-12px,0); } }
 @keyframes cg-exit { to { opacity: 0; transform: scale(0.96) translateY(8px); } }
 @keyframes cg-shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
 @keyframes cg-scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(500%); } }
 @keyframes cg-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cg-fade-out { from { opacity: 1; } to { opacity: 0; visibility: hidden; } }
 @keyframes cg-fade-up { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
 @keyframes cg-slide-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 @keyframes cg-drawer-in { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: none; } }
+@keyframes cg-pop-in { from { opacity: 0; transform: translateY(14px) scale(0.85); } to { opacity: 1; transform: none; } }
+@keyframes cg-pop-out { to { opacity: 0; transform: translateY(-8px) scale(0.92); } }
+@keyframes cg-intro-bat-fly {
+  0% { transform: translate(0,0); }
+  50% { transform: translate(60vw, -6vh); }
+  100% { transform: translate(120vw, 4vh); }
+}
+@keyframes cg-intro-walk { from { left: -8%; } to { left: 104%; } }
+@keyframes cg-leg-swing { from { transform: rotate(-22deg); } to { transform: rotate(22deg); } }
+@keyframes cg-arm-swing { from { transform: rotate(-14deg); } to { transform: rotate(14deg); } }
 
 @media (prefers-reduced-motion: reduce) {
   .cg-root *, .cg-root *::before, .cg-root *::after {
@@ -338,6 +314,7 @@ const GLOBAL_CSS = `
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+  .cg-bat, .cg-pumpkin-drift { display: none; }
 }
 `;
 
@@ -353,6 +330,8 @@ const fnv1a = (input: string): string => {
     }
     return (hash >>> 0).toString(16).padStart(8, '0');
 };
+
+const cssVars = (vars: Record<string, string>): React.CSSProperties => vars as React.CSSProperties;
 
 const searchHaystack = (asset: Asset): string =>
     `${asset.name} ${asset.id} ${asset.region} ${asset.kind} ${asset.owner}`.toLowerCase();
@@ -420,6 +399,56 @@ async function postPurge(asset: Asset): Promise<PurgeResponse> {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                         Sound engine (Web Audio API)                       */
+/* -------------------------------------------------------------------------- */
+
+function scheduleTone(ctx: AudioContext, tone: Tone, base: number): void {
+    const start = base + (tone.delay ?? 0);
+    const end = start + tone.duration;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = tone.type;
+    osc.frequency.setValueAtTime(tone.from, start);
+    osc.frequency.exponentialRampToValueAtTime(tone.to, end);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(tone.peak, start + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, end);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+    osc.start(start);
+    osc.stop(end + 0.02);
+}
+
+function useSoundEngine(enabled: boolean): (cue: Cue) => void {
+    const ctxRef = useRef<AudioContext | null>(null);
+    const enabledRef = useRef(enabled);
+    useEffect(() => { enabledRef.current = enabled; }, [enabled]);
+    useEffect(() => () => {
+        const ctx = ctxRef.current;
+        ctxRef.current = null;
+        if (ctx && ctx.state !== 'closed') void ctx.close().catch(() => undefined);
+    }, []);
+
+    return useCallback((cue: Cue) => {
+        if (!enabledRef.current || typeof window === 'undefined') return;
+        try {
+            if (!ctxRef.current) {
+                const Ctor = window.AudioContext ?? (window as WindowWithWebkit).webkitAudioContext;
+                if (!Ctor) return;
+                ctxRef.current = new Ctor();
+            }
+            const ctx = ctxRef.current;
+            if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined);
+            const now = ctx.currentTime;
+            CUES[cue].forEach((tone) => scheduleTone(ctx, tone, now));
+        } catch {
+            // Sound is decorative; never let it break the app.
+        }
+    }, []);
+}
+
+/* -------------------------------------------------------------------------- */
 /*                              Toast notifications                           */
 /* -------------------------------------------------------------------------- */
 
@@ -451,15 +480,186 @@ function useToasts() {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                        Skeleton reaction (feedback layer)                  */
+/* -------------------------------------------------------------------------- */
+
+function useReactions() {
+    const [reaction, setReaction] = useState<Reaction | null>(null);
+    const [leaving, setLeaving] = useState(false);
+    const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const nextId = useRef(0);
+
+    useEffect(() => () => {
+        if (timer.current) clearTimeout(timer.current);
+        if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    }, []);
+
+    const fire = useCallback((kind: ReactionKind, face: ReactionFace, title: string, detail: string) => {
+        if (timer.current) clearTimeout(timer.current);
+        if (leaveTimer.current) clearTimeout(leaveTimer.current);
+        nextId.current += 1;
+        setLeaving(false);
+        setReaction({ id: nextId.current, kind, face, title, detail });
+        timer.current = setTimeout(() => {
+            setLeaving(true);
+            leaveTimer.current = setTimeout(() => setReaction(null), 260);
+        }, REACTION_TTL_MS);
+    }, []);
+
+    return { reaction, leaving, fire };
+}
+
+/** Skeleton face: smiling for success, neutral (flat mouth) for delete/export. */
+function SkeletonFace({ face, className = '' }: { face: ReactionFace; className?: string }) {
+    return (
+        <svg viewBox="0 0 80 80" className={className} aria-hidden="true">
+            <circle cx="40" cy="40" r="36" fill="#0f172a" stroke="#1e293b" strokeWidth="2" />
+            <ellipse cx="40" cy="38" rx="27" ry="29" fill="#f1f5f9" />
+            <path d="M17 30 Q13 20 22 16 Q26 24 24 32 Z" fill="#f1f5f9" />
+            <path d="M63 30 Q67 20 58 16 Q54 24 56 32 Z" fill="#f1f5f9" />
+            <ellipse cx="28" cy="36" rx="7" ry="8.5" fill="#0f172a" />
+            <ellipse cx="52" cy="36" rx="7" ry="8.5" fill="#0f172a" />
+            <circle cx="28" cy="36" r="2.3" fill={face === 'smile' ? '#34d399' : '#cbd5e1'} />
+            <circle cx="52" cy="36" r="2.3" fill={face === 'smile' ? '#34d399' : '#cbd5e1'} />
+            <path d="M38 44 L40 50 L42 44" stroke="#0f172a" strokeWidth="2" fill="none" strokeLinecap="round" />
+            {face === 'smile' ? (
+                <path d="M22 56 Q40 70 58 56" stroke="#0f172a" strokeWidth="3" fill="none" strokeLinecap="round" />
+            ) : (
+                <path d="M23 58 L57 58" stroke="#0f172a" strokeWidth="3" fill="none" strokeLinecap="round" />
+            )}
+            {face === 'smile' ? (
+                <>
+                    <rect x="30" y="56" width="4" height="7" fill="#0f172a" />
+                    <rect x="37" y="59" width="4" height="7" fill="#0f172a" />
+                    <rect x="44" y="56" width="4" height="7" fill="#0f172a" />
+                </>
+            ) : null}
+        </svg>
+    );
+}
+
+function ReactionLayer({ reaction, leaving }: { reaction: Reaction | null; leaving: boolean }) {
+    if (!reaction) return null;
+    const tint = reaction.face === 'smile' ? 'border-emerald-500/40 shadow-[0_0_50px_-10px_rgba(16,185,129,0.5)]' : 'border-slate-600/50 shadow-[0_0_40px_-10px_rgba(100,116,139,0.4)]';
+
+    return (
+        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[55] flex justify-center px-4" aria-live="polite">
+            <div className={`cg-glass pointer-events-auto flex items-center gap-4 rounded-2xl border px-5 py-3.5 ${tint} ${leaving ? 'cg-pop-out' : 'cg-pop-in'}`}>
+                <SkeletonFace face={reaction.face} className="h-12 w-12 shrink-0" />
+                <div>
+                    <p className="text-sm font-bold text-slate-100">{reaction.title}</p>
+                    <p className="cg-mono text-[11px] text-slate-400">{reaction.detail}</p>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+/* -------------------------------------------------------------------------- */
 /*                               Decorative art                               */
 /* -------------------------------------------------------------------------- */
 
-function CobWeb({ className = '' }: { className?: string }) {
+function Bat({ className = '' }: { className?: string }) {
     return (
-        <svg viewBox="0 0 120 120" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="0.8">
-            <path d="M0 0 L120 0 M0 0 L0 120 M0 0 L120 120 M0 0 L92 120 M0 0 L120 60 M0 0 L60 120" />
-            <path d="M0 22 Q22 22 22 0 M0 46 Q46 46 46 0 M0 72 Q72 72 72 0 M0 98 Q98 98 98 0" />
+        <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+            <path d="M12 8C10 5 7 4 4 4.5L1 3l1.5 5c-.5 1-.5 2 0 3h4.5c1 2 2.5 3.5 5 3.5s4-1.5 5-3.5h4.5c.5-1 .5-2 0-3L23 3l-3 1.5C17 4 14 5 12 8z" />
         </svg>
+    );
+}
+
+function PumpkinOutline({ className = '' }: { className?: string }) {
+    return (
+        <svg viewBox="0 0 48 48" className={className} aria-hidden="true" fill="currentColor">
+            <ellipse cx="24" cy="27" rx="19" ry="17" />
+            <path d="M22 9 L24 3.5 L27 9 Z" />
+        </svg>
+    );
+}
+
+const BATS = [
+    { y: '9%', size: '30px', duration: '28s', delay: '-3s' },
+    { y: '24%', size: '20px', duration: '36s', delay: '-16s' },
+    { y: '46%', size: '16px', duration: '44s', delay: '-29s' },
+] as const;
+
+const PUMPKINS = [
+    { x: '8%', size: '42px', duration: '26s', delay: '-2s' },
+    { x: '34%', size: '30px', duration: '34s', delay: '-14s' },
+    { x: '62%', size: '50px', duration: '30s', delay: '-8s' },
+    { x: '85%', size: '26px', duration: '38s', delay: '-22s' },
+] as const;
+
+function AmbientBackground() {
+    return (
+        <>
+            <div aria-hidden="true" className="cg-fog" />
+            <div aria-hidden="true" className="cg-moon" />
+            {BATS.map((bat) => (
+                <span key={bat.y} aria-hidden="true" className="cg-bat" style={cssVars({ '--y': bat.y, '--s': bat.size, '--d': bat.duration, '--delay': bat.delay })}>
+          <Bat className="h-full w-full" />
+        </span>
+            ))}
+            {PUMPKINS.map((p) => (
+                <span key={p.x} aria-hidden="true" className="cg-pumpkin-drift text-amber-500" style={cssVars({ '--x': p.x, '--s': p.size, '--d': p.duration, '--delay': p.delay })}>
+          <PumpkinOutline className="h-full w-full" />
+        </span>
+            ))}
+            <div aria-hidden="true" className="cg-vignette" />
+        </>
+    );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                            Intro: bat + skeleton walk                      */
+/* -------------------------------------------------------------------------- */
+
+function WalkingSkeleton({ className = '' }: { className?: string }) {
+    return (
+        <svg viewBox="0 0 60 90" className={className} aria-hidden="true">
+            <circle cx="30" cy="14" r="10" fill="#f1f5f9" />
+            <circle cx="26" cy="13" r="1.6" fill="#0f172a" />
+            <circle cx="34" cy="13" r="1.6" fill="#0f172a" />
+            <path d="M26 18 Q30 21 34 18" stroke="#0f172a" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+            <rect x="24" y="24" width="12" height="18" rx="3" fill="#f1f5f9" />
+            <g className="cg-arm-l">
+                <rect x="14" y="26" width="6" height="18" rx="3" fill="#f1f5f9" />
+            </g>
+            <g className="cg-arm-r">
+                <rect x="40" y="26" width="6" height="18" rx="3" fill="#f1f5f9" />
+            </g>
+            <g className="cg-leg-l">
+                <rect x="24" y="42" width="6" height="26" rx="3" fill="#f1f5f9" />
+            </g>
+            <g className="cg-leg-r">
+                <rect x="30" y="42" width="6" height="26" rx="3" fill="#f1f5f9" />
+            </g>
+        </svg>
+    );
+}
+
+function IntroSequence({ fading, onDone }: { fading: boolean; onDone: () => void }) {
+    useEffect(() => {
+        const t = setTimeout(onDone, INTRO_MS);
+        return () => clearTimeout(t);
+    }, [onDone]);
+
+    return (
+        <div className={`fixed inset-0 z-[80] overflow-hidden bg-[#04060a] ${fading ? 'cg-intro-fade' : ''}`}>
+            <div aria-hidden="true" className="cg-fog" />
+            <div aria-hidden="true" className="cg-moon" />
+            <div className="cg-intro-bat"><Bat className="h-full w-full" /></div>
+            <div className="cg-intro-skel"><WalkingSkeleton className="h-full w-full" /></div>
+
+            <div className="relative z-10 flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+                <Skull className="h-12 w-12 text-emerald-400 motion-safe:animate-pulse" aria-hidden="true" />
+                <h1 className="cg-title text-4xl text-emerald-300 md:text-5xl">CLOUD GRAVEYARD</h1>
+                <p className="cg-mono text-xs text-slate-400">Entering the graveyard…</p>
+                <div className="mt-2 h-1 w-48 overflow-hidden rounded-full bg-slate-800">
+                    <div className="h-full rounded-full bg-emerald-400" style={{ animation: `cg-fade-in ${INTRO_MS}ms linear forwards` }} />
+                </div>
+            </div>
+        </div>
     );
 }
 
@@ -506,14 +706,8 @@ function Panel({
         return (
             <div className="fixed inset-0 z-50 flex justify-end">
                 <div aria-hidden="true" onClick={() => onCloseRef.current()} className="cg-fade-in absolute inset-0 bg-slate-950/80 backdrop-blur-sm" />
-                <div
-                    ref={panelRef}
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby={labelledBy}
-                    tabIndex={-1}
-                    className={`cg-glass cg-drawer-in relative h-full w-full ${widthClass} overflow-y-auto border-l p-6 focus:outline-none ${ring}`}
-                >
+                <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={labelledBy} tabIndex={-1}
+                     className={`cg-glass cg-drawer-in relative h-full w-full ${widthClass} overflow-y-auto border-l p-6 focus:outline-none ${ring}`}>
                     {children}
                 </div>
             </div>
@@ -523,14 +717,8 @@ function Panel({
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div aria-hidden="true" onClick={() => onCloseRef.current()} className="cg-fade-in absolute inset-0 bg-slate-950/80 backdrop-blur-sm" />
-            <div
-                ref={panelRef}
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby={labelledBy}
-                tabIndex={-1}
-                className={`cg-glass cg-fade-up relative max-h-[88vh] w-full ${widthClass} overflow-y-auto rounded-2xl border p-6 focus:outline-none ${ring}`}
-            >
+            <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={labelledBy} tabIndex={-1}
+                 className={`cg-glass cg-fade-up relative max-h-[88vh] w-full ${widthClass} overflow-y-auto rounded-2xl border p-6 focus:outline-none ${ring}`}>
                 {children}
             </div>
         </div>
@@ -607,6 +795,9 @@ function EmptyState({ hasFilters, onClear }: { hasFilters: boolean; onClear: () 
 /* -------------------------------------------------------------------------- */
 
 export default function CloudGraveyardDashboard() {
+    const [introActive, setIntroActive] = useState(true);
+    const [introFading, setIntroFading] = useState(false);
+
     const [assets, setAssets] = useState<Asset[]>(SEED);
     const [auditLog, setAuditLog] = useState<AuditEntry[]>([]);
 
@@ -637,6 +828,27 @@ export default function CloudGraveyardDashboard() {
 
     const play = useSoundEngine(soundEnabled);
     const { toasts, notify, dismiss } = useToasts();
+    const { reaction, leaving, fire: fireReaction } = useReactions();
+
+    // Skip the intro on repeat visits; always honor reduced motion.
+    useEffect(() => {
+        try {
+            const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            const seen = window.localStorage.getItem(INTRO_KEY) === '1';
+            if (reduced || seen) {
+                setIntroActive(false);
+            } else {
+                window.localStorage.setItem(INTRO_KEY, '1');
+            }
+        } catch {
+            // If storage is blocked, just show the intro once per load.
+        }
+    }, []);
+
+    const finishIntro = useCallback(() => {
+        setIntroFading(true);
+        window.setTimeout(() => setIntroActive(false), 520);
+    }, []);
 
     useEffect(() => {
         try {
@@ -652,7 +864,7 @@ export default function CloudGraveyardDashboard() {
     const anyModalOpen = showAddModal || showAudit || selected !== null;
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
-            if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey || anyModalOpen) return;
+            if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey || anyModalOpen || introActive) return;
             const t = e.target as HTMLElement | null;
             if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
             e.preventDefault();
@@ -660,7 +872,7 @@ export default function CloudGraveyardDashboard() {
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [anyModalOpen]);
+    }, [anyModalOpen, introActive]);
 
     /* ----------------------------- Derived data ----------------------------- */
 
@@ -720,7 +932,7 @@ export default function CloudGraveyardDashboard() {
             setScanning(false);
             setLastScan(new Date());
             play('success');
-            notify('success', `Scan complete — ${assets.length} resources re-checked.`);
+            fireReaction('scan', 'smile', REACTION_COPY.scan.title(''), REACTION_COPY.scan.detail(''));
         }, SCAN_MS);
     };
 
@@ -774,8 +986,8 @@ export default function CloudGraveyardDashboard() {
 
         setExitingIds((prev) => new Set(prev).add(target.id));
         closeDetails();
-        play('success');
-        notify('success', `Deleted ${target.name}. ${money(target.monthlyCost)}/mo reclaimed.`);
+        play('neutral');
+        fireReaction('delete', 'neutral', REACTION_COPY.delete.title(target.name), REACTION_COPY.delete.detail(money(target.monthlyCost)));
 
         exitTimer.current = setTimeout(() => {
             exitTimer.current = null;
@@ -783,7 +995,7 @@ export default function CloudGraveyardDashboard() {
             setExitingIds((prev) => { const n = new Set(prev); n.delete(target.id); return n; });
             setPurgingId(null);
         }, EXIT_MS);
-    }, [play, notify, closeDetails]);
+    }, [play, notify, closeDetails, fireReaction]);
 
     const closeAddModal = useCallback(() => { setShowAddModal(false); setDraftSubmitted(false); }, []);
     const openAddModal = () => { play('click'); setShowAddModal(true); };
@@ -807,7 +1019,7 @@ export default function CloudGraveyardDashboard() {
         setDraftSubmitted(false);
         setShowAddModal(false);
         play('success');
-        notify('info', `Added ${created.name} to monitoring.`);
+        fireReaction('add', 'smile', REACTION_COPY.add.title(created.name), REACTION_COPY.add.detail(''));
     };
 
     const exportAudit = () => {
@@ -822,7 +1034,8 @@ export default function CloudGraveyardDashboard() {
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 0);
-        notify('success', `Exported ${auditLog.length} record${auditLog.length === 1 ? '' : 's'}.`);
+        play('success');
+        fireReaction('export', 'smile', REACTION_COPY.export.title(''), REACTION_COPY.export.detail(''));
     };
 
     const copyKey = async (key: string) => {
@@ -841,11 +1054,9 @@ export default function CloudGraveyardDashboard() {
         <div className="cg-root relative min-h-screen overflow-x-hidden bg-[#04060a] p-5 text-slate-100 md:p-10">
             <style>{GLOBAL_CSS}</style>
 
-            <div aria-hidden="true" className="cg-fog" />
-            <div aria-hidden="true" className="cg-moon" />
-            <div aria-hidden="true" className="cg-vignette" />
-            <CobWeb className="pointer-events-none fixed left-0 top-0 h-48 w-48 text-slate-300 opacity-10" />
-            <CobWeb className="pointer-events-none fixed bottom-0 right-0 h-56 w-56 rotate-180 text-slate-300 opacity-10" />
+            {introActive && <IntroSequence fading={introFading} onDone={finishIntro} />}
+
+            <AmbientBackground />
 
             {/* Toasts */}
             <div role="status" aria-live="polite" className="pointer-events-none fixed right-4 top-4 z-[60] flex w-[min(380px,calc(100vw-2rem))] flex-col gap-2">
@@ -862,6 +1073,9 @@ export default function CloudGraveyardDashboard() {
                     );
                 })}
             </div>
+
+            {/* Skeleton reaction layer (success = smile, delete/export = neutral) */}
+            <ReactionLayer reaction={reaction} leaving={leaving} />
 
             <div className="relative z-10 mx-auto max-w-[1500px]">
                 {/* Status bar */}
@@ -1063,8 +1277,7 @@ export default function CloudGraveyardDashboard() {
                                 const Icon = KIND_ICON[asset.kind];
                                 const exiting = exitingIds.has(asset.id);
                                 return (
-                                    <tr key={asset.id}
-                                        onClick={() => openDetails(asset)}
+                                    <tr key={asset.id} onClick={() => openDetails(asset)}
                                         className={`group/row cursor-pointer transition-colors hover:bg-emerald-500/5 ${exiting ? 'cg-exit' : ''}`}>
                                         <td className="px-4 py-4">
                                             <div className="flex items-center gap-3">
